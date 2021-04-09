@@ -65,9 +65,54 @@ class Session:
         else:
             self.headers['User-Agent'] = user_agent
 
+    def get_model_versions(self, context, models=None):
+        """
+        Retrieve the current version of the available ORES models.
+        
+        :Parameters:
+            context : str
+                The name of the context -- usually the database name of a wiki
+            models : `iterable`
+                The names of models to retrieve versions for. If not found, an error is raised.
+        
+        :Returns:
+            model_versions : dict
+                a mapping of model name to version (both strings)
+
+        """
+        start = time.time()
+        url = self.host + "/v3/scores/{0}/".format(urllib.parse.quote(context))
+        with self._session.get(url, 
+                             headers=self.headers,
+                             verify=True, 
+                             stream=True) as response:
+            try:
+                doc = response.json()
+            except ValueError:
+                raise RuntimeError("Non-json response: " + response.text[:100])
+
+        model_versions = doc[context]['models']
+        logging.debug("Model versions request for " +
+                      "{0} models completed in {1} seconds"
+                      .format(len(model_versions), round(time.time() - start, 3)))
+        
+        model_versions = {
+            model_name: model_md['version']
+            for model_name, model_md in model_versions.items()
+            if models is None or model_name in models
+        }
+        
+        # if models was specified, check to ensure they are present
+        if models is not None:
+            for model_name in models:
+                if model_name not in model_versions:
+                    raise ValueError(f"Failed to find model version for model '{model_name}'. Check spelling.")
+        
+        return model_versions
+            
     def score(self, context, models, revids):
         """
-        Genetate scores for model applied to a sequence of revisions.
+        Generate scores for model applied to a sequence of revisions.
 
         :Parameters:
             context : str
@@ -123,13 +168,13 @@ class Session:
         logging.debug("Sending score request for {0} revisions"
                       .format(len(rev_ids)))
         start = time.time()
-        response = self._session.get(url, params=params,
+        with self._session.get(url, params=params,
                                      headers=self.headers,
-                                     verify=True, stream=True)
-        try:
-            doc = response.json()
-        except ValueError:
-            raise RuntimeError("Non-json response: " + response.text[:100])
+                                     verify=True, stream=True) as response:
+            try:
+                doc = response.json()
+            except ValueError:
+                raise RuntimeError("Non-json response: " + response.text[:100])
 
         logging.debug("Score request completed for " +
                       "{0} revisions completed in {1} seconds"
